@@ -16,6 +16,10 @@
  * along with BlockProt.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/*
+ * Modifications made by DelMii on 23 Feb 2025
+ * Original source: https://github.com/spnda/BlockProt
+ */
 package de.sean.blockprot.bukkit.listeners;
 
 import de.sean.blockprot.bukkit.BlockProt;
@@ -32,66 +36,64 @@ import org.bukkit.inventory.InventoryHolder;
 import org.jetbrains.annotations.Nullable;
 
 public class HopperEventListener implements Listener {
+
     @EventHandler
     public void onItemMove(InventoryMoveItemEvent event) {
-        if (event.getSource().getHolder() == null) return;
-        if (BlockProt.getDefaultConfig().isWorldExcluded(event.getSource().getHolder())) return;
-        if ((event.getDestination().getType() == InventoryType.HOPPER || event.getSource().getType() == InventoryType.HOPPER)) {
-            // This is a hopper trying to pull from something.
-            Block source = getBlock(event.getSource().getHolder());
-            if (source != null && BlockProt.getDefaultConfig().isLockable(source.getType())) {
-                BlockNBTHandler sourceHandler = new BlockNBTHandler(source);
-                if (sourceHandler.isProtected()) {
-                    // The source chest is owned by someone. Check if the hopper block is also owned by
-                    // the same player and if so, allow this event to happen, regardless of the hopper
-                    // protection.
-                    InventoryHolder destinationHolder = event.getDestination().getHolder();
-                    if (destinationHolder instanceof Container || destinationHolder instanceof DoubleChest) {
-                        // The destination is a block of some sorts, chest, hopper, ...
+        InventoryHolder sourceHolder = event.getSource().getHolder();
+        if (sourceHolder == null) return;
 
-                        Block destination = getBlock(event.getDestination().getHolder());
-                        if (destination != null && BlockProt.getDefaultConfig().isLockable(destination.getType())) {
-                            BlockNBTHandler destinationHandler = new BlockNBTHandler(destination);
-                            if (destinationHandler.isProtected()
-                                    && !destinationHandler.isOwner(sourceHandler.getOwner())
-                                    && sourceHandler.getRedstoneHandler().getHopperProtection()) {
-                                // The hopper and chest are NOT owned by the same person and the chest has
-                                // the hopper protection enabled, cancel this event.
-                                event.setCancelled(true);
-                            } else if (destinationHandler.isNotProtected()
-                                    && sourceHandler.getRedstoneHandler().getHopperProtection()) {
-                                // The hopper isn't protected, whereas the source block is, and it has the
-                                // hopper protection enabled. Cancel the event because it's trying to access
-                                // a locked container.
-                                event.setCancelled(true);
-                            }
-                        } else {
-                            /* The destination block cannot be locked and is therefore considered public */
-                            if (sourceHandler.getRedstoneHandler().getHopperProtection()) {
-                                event.setCancelled(true);
-                            }
-                        }
-                    } else if (destinationHolder instanceof Minecart) {
-                        // As Minecarts are not lockable (yet?), we will disallow the move
-                        // if hopper protection is enabled.
-                        if (sourceHandler.getRedstoneHandler().getHopperProtection()) {
-                            event.setCancelled(true);
-                        }
-                    }
-                }
+        var config = BlockProt.getDefaultConfig();
+        if (config.isWorldExcluded(sourceHolder)) return;
+
+        if (event.getDestination().getType() != InventoryType.HOPPER && event.getSource().getType() != InventoryType.HOPPER) return;
+
+        Block sourceBlock = getBlock(sourceHolder);
+        if (sourceBlock == null || !config.isLockable(sourceBlock.getType())) return;
+
+        BlockNBTHandler sourceHandler = new BlockNBTHandler(sourceBlock);
+        if (!sourceHandler.isProtected()) return;
+
+        boolean hopperProtection = sourceHandler.getRedstoneHandler().getHopperProtection();
+        InventoryHolder destinationHolder = event.getDestination().getHolder();
+
+        if (destinationHolder instanceof Container || destinationHolder instanceof DoubleChest) {
+            handleBlockDestination(event, sourceHandler, hopperProtection, destinationHolder);
+        } else if (destinationHolder instanceof Minecart) {
+            if (hopperProtection) event.setCancelled(true);
+        }
+    }
+
+    private void handleBlockDestination(InventoryMoveItemEvent event, BlockNBTHandler sourceHandler, boolean hopperProtection, InventoryHolder destinationHolder) {
+        Block destinationBlock = getBlock(destinationHolder);
+        if (destinationBlock == null) return;
+
+        var config = BlockProt.getDefaultConfig();
+        if (!config.isLockable(destinationBlock.getType())) {
+            if (hopperProtection) event.setCancelled(true);
+            return;
+        }
+
+        BlockNBTHandler destinationHandler = new BlockNBTHandler(destinationBlock);
+        if (destinationHandler.isProtected()) {
+            if (!destinationHandler.isOwner(sourceHandler.getOwner()) && hopperProtection) {
+                event.setCancelled(true);
             }
+        } else if (hopperProtection) {
+            event.setCancelled(true);
         }
     }
 
     /**
-     * Get the block from a InventoryHolder, instead of just getting the block by location as before.
+     * Get the block from an InventoryHolder, avoiding unnecessary calls.
      */
     @Nullable
     private Block getBlock(InventoryHolder holder) {
-        if (holder instanceof Container) return ((Container) holder).getBlock();
-        else if (holder instanceof DoubleChest doubleChest) {
-            if (doubleChest.getWorld() == null) return null;
+        if (holder instanceof Container container) {
+            return container.getBlock();
+        } else if (holder instanceof DoubleChest doubleChest && doubleChest.getWorld() != null) {
             return doubleChest.getWorld().getBlockAt(doubleChest.getLocation());
-        } else return null;
+        }
+        return null;
     }
 }
+
